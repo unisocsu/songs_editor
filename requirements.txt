@@ -1,0 +1,8 @@
+# מותקן אחרי torch/torchaudio (גרסאות CPU) - ראה את ה-workflow
+setuptools<81
+numpy
+scipy
+librosa
+soundfile
+pretty_midi
+demucs==4.0.1

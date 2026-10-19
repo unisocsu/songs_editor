@@ -1,0 +1,87 @@
+name: analyze-song
+
+on:
+  workflow_dispatch:
+    inputs:
+      song_url:
+        description: 'קישור לקובץ השיר (או נתיב בתוך הריפו, למשל songs/shir.mp3)'
+        required: true
+      stems:
+        description: 'הפרדת ערוצים (Demucs) - איטי אבל מדויק יותר'
+        type: boolean
+        default: true
+      lyrics:
+        description: 'תמלול מילים עם זמנים (Whisper)'
+        type: boolean
+        default: false
+      midi_engine:
+        description: 'מנוע חילוץ MIDI'
+        type: choice
+        options: [pyin, basic-pitch]
+        default: pyin
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python packages (CPU only)
+        env:
+          LYRICS: ${{ inputs.lyrics }}
+          MIDI_ENGINE: ${{ inputs.midi_engine }}
+        run: |
+          pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          if [ "$LYRICS" = "true" ]; then pip install faster-whisper; fi
+          if [ "$MIDI_ENGINE" = "basic-pitch" ]; then pip install basic-pitch; fi
+
+      - name: Cache Demucs model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/torch/hub/checkpoints
+          key: demucs-htdemucs-v1
+
+      - name: Get the song
+        env:
+          SONG_URL: ${{ inputs.song_url }}
+        run: |
+          case "$SONG_URL" in
+            http*)
+              # המרת קישור blob של גיטהאב לקישור raw
+              URL=$(echo "$SONG_URL" | sed -E 's#https://github.com/(.*)/blob/#https://raw.githubusercontent.com/\1/#')
+              curl -L --fail --retry 3 "$URL" -o input_song
+              ;;
+            *)
+              cp "$SONG_URL" input_song
+              ;;
+          esac
+          ls -lh input_song
+
+      - name: Analyze
+        env:
+          STEMS: ${{ inputs.stems }}
+          LYRICS: ${{ inputs.lyrics }}
+          MIDI_ENGINE: ${{ inputs.midi_engine }}
+        run: |
+          ARGS="--out out --midi-engine $MIDI_ENGINE"
+          [ "$STEMS" = "true" ] || ARGS="$ARGS --no-stems"
+          [ "$LYRICS" = "true" ] && ARGS="$ARGS --lyrics"
+          python src/analyze.py input_song $ARGS
+
+      - name: Show summary
+        run: cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysis
+          path: out/
