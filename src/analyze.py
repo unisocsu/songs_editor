@@ -101,16 +101,19 @@ def sync_mean(feat, bounds):
     return np.array(cols).T
 
 
-def detect_chords(chroma_sync, times):
+def detect_chords(chroma_sync, times, stay=0.5, sharp=30.0):
+    """זיהוי אקורדים עם החלקת Viterbi (מונע קפיצות אקורד בכל ביט)."""
     names, templates = chord_templates()
-    seq = []
-    for i in range(chroma_sync.shape[1]):
-        col = chroma_sync[:, i]
-        n = np.linalg.norm(col)
-        if n < 1e-6:
-            seq.append("N")
-            continue
-        seq.append(names[int(np.argmax(templates @ (col / n)))])
+    norms = np.linalg.norm(chroma_sync, axis=0)
+    cols = chroma_sync / (norms + 1e-9)
+    prob = np.exp(sharp * (templates @ cols))
+    prob[:, norms < 1e-6] = 1.0
+    prob = prob / prob.sum(axis=0, keepdims=True)
+    k = len(names)
+    trans = np.full((k, k), (1 - stay) / (k - 1))
+    np.fill_diagonal(trans, stay)
+    path = librosa.sequence.viterbi(prob, trans)
+    seq = [names[i] for i in path]
     merged = []
     for i, ch in enumerate(seq):
         start, end = float(times[i]), float(times[i + 1])
@@ -169,7 +172,23 @@ def melody_to_midi_pyin(y, sr, bpm, out_path: Path):
     )
     times = librosa.times_like(f0, sr=sr, hop_length=HOP)
     frame_dur = HOP / sr
-    midi_vals = np.where(voiced & ~np.isnan(f0), np.round(librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0))), np.nan)
+    midi_vals = np.where(voiced & ~np.isnan(f0), librosa.hz_to_midi(np.nan_to_num(f0, nan=1.0)), np.nan)
+    # פילטר חציוני על כל קטע קולי רציף (מבטל רעידות גובה צליל), ואז עיגול לתו
+    from scipy.signal import medfilt
+    isv = ~np.isnan(midi_vals)
+    idx = 0
+    while idx < len(midi_vals):
+        if not isv[idx]:
+            idx += 1
+            continue
+        j = idx
+        while j < len(midi_vals) and isv[j]:
+            j += 1
+        seg = midi_vals[idx:j]
+        if len(seg) >= 5:
+            midi_vals[idx:j] = medfilt(seg, 5)
+        idx = j
+    midi_vals = np.round(midi_vals)
 
     notes, cur = [], None  # cur = [pitch, start, end]
     for t, m in zip(times, midi_vals):
@@ -186,7 +205,14 @@ def melody_to_midi_pyin(y, sr, bpm, out_path: Path):
             cur = [m, t, t + frame_dur]
     if cur:
         notes.append(cur)
-    notes = [n for n in notes if n[2] - n[1] >= 0.08]
+    # החלקה: איחוד תווים זהים סמוכים והסרת תווים קצרים מדי
+    merged = []
+    for n in notes:
+        if merged and merged[-1][0] == n[0] and n[1] - merged[-1][2] <= 0.1:
+            merged[-1][2] = n[2]
+        else:
+            merged.append(list(n))
+    notes = [n for n in merged if n[2] - n[1] >= 0.1]
 
     pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
     inst = pretty_midi.Instrument(program=0, name="melody")
@@ -218,12 +244,12 @@ def melody_summary(notes):
 
 
 # ---------------------------------------------------------------------- תמלול
-def transcribe(path: Path):
+def transcribe(path: Path, lang=None):
     from faster_whisper import WhisperModel
 
     log("מתמלל מילים (faster-whisper, CPU)...")
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    segments, info = model.transcribe(str(path), word_timestamps=True, vad_filter=True)
+    segments, info = model.transcribe(str(path), language=lang, word_timestamps=True, vad_filter=True)
     out = []
     for s in segments:
         out.append({
@@ -263,6 +289,8 @@ def main():
     ap.add_argument("--no-stems", action="store_true", help="דלג על הפרדת ערוצים (מהיר)")
     ap.add_argument("--midi-engine", choices=["pyin", "basic-pitch"], default="pyin")
     ap.add_argument("--lyrics", action="store_true", help="תמלול מילים עם זמנים")
+    ap.add_argument("--lyrics-lang", default="he", help="שפת התמלול (ברירת מחדל: he)")
+    ap.add_argument("--tempo", type=float, default=None, help="כפה BPM (אם הזיהוי האוטומטי כפול/חצי)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -281,9 +309,21 @@ def main():
     y, sr = librosa.load(str(wav), sr=SR, mono=True)
     duration = float(len(y) / sr)
 
+    def load_stem(name):
+        yy, _ = librosa.load(str(stems[name]), sr=SR, mono=True)
+        return yy
+
     log("קצב וביטים...")
-    tempo, beat_frames = detect_tempo_beats(y, sr)
-    y_harm = librosa.effects.harmonic(y)
+    tempo, beat_frames = detect_tempo_beats(load_stem("drums") + 0.3 * y if "drums" in stems else y, sr)
+    if args.tempo:
+        tempo = float(args.tempo)
+        _, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=HOP, bpm=tempo)
+        beat_frames = np.asarray(beat_frames, dtype=int)
+    # הרמוניה: מערוצי הבס וה"שאר" בלבד (בלי תופים ושירה) - הרבה יותר נקי
+    if "other" in stems and "bass" in stems:
+        y_harm = librosa.effects.harmonic(load_stem("other") + load_stem("bass"))
+    else:
+        y_harm = librosa.effects.harmonic(y)
 
     log("סולם, אקורדים ומבנה...")
     key = detect_key(y_harm, sr)
@@ -312,6 +352,7 @@ def main():
         "source_file": src.name,
         "duration_sec": round(duration, 3),
         "tempo_bpm": round(tempo, 2),
+        "tempo_alternatives": {"half": round(tempo / 2, 2), "double": round(tempo * 2, 2)},
         "beats_sec": [round(float(t), 3) for t in librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)],
         "key": key,
         "chords": chords,
@@ -325,7 +366,7 @@ def main():
         "notes": "ניתוח אלגוריתמי - הערכה בלבד. מומלץ לבדוק את melody.mid לפני שלבי היצירה.",
     }
     if args.lyrics:
-        analysis["lyrics"] = transcribe(stems.get("vocals", wav))
+        analysis["lyrics"] = transcribe(stems.get("vocals", wav), args.lyrics_lang)
 
     (out / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
     write_summary(analysis, out / "summary.md")

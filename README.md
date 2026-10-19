@@ -31,6 +31,10 @@ python src/analyze.py songs/shir.mp3 --out out --no-stems # מהיר
 python src/analyze.py songs/shir.mp3 --out out --lyrics   # + תמלול
 ```
 
+## דגלים נוספים
+- `--tempo 92` לכפות BPM אם הזיהוי האוטומטי יצא כפול/חצי (ב-`analysis.json` יש `tempo_alternatives`)
+- `--lyrics-lang he` שפת התמלול (ברירת מחדל עברית; בלי זה Whisper עלול לזהות אנגלית ולתעתק)
+
 ## הערות
 - הניתוח אלגוריתמי (הערכה). מומלץ לבדוק את `melody.mid` לפני שלבי היצירה.
 - `pyin` מתאים למנגינה חד-קולית (שירה). `basic-pitch` לחומר פוליפוני.
