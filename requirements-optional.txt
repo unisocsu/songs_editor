@@ -1,4 +1,4 @@
+# הפרדת שירה מליווי (--separate): להתקין אחרי torch/torchaudio==2.5.1 (CPU)
+demucs==4.0.1
 # תמלול מילים (--lyrics)
 faster-whisper
-# חילוץ MIDI פוליפוני (--midi-engine basic-pitch) - כבד יותר
-basic-pitch

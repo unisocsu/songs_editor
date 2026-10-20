@@ -1,30 +1,25 @@
-name: analyze-song
+name: extract-melody
 
 on:
   workflow_dispatch:
     inputs:
       song_url:
-        description: 'קישור לקובץ השיר (או נתיב בתוך הריפו, למשל songs/shir.mp3)'
+        description: 'קישור להקלטה (או נתיב בתוך הריפו, למשל songs/shir.m4a)'
         required: true
-      stems:
-        description: 'הפרדת ערוצים (Demucs) - איטי אבל מדויק יותר'
+      separate:
+        description: 'יש ליווי בהקלטה? (הפרדת שירה עם Demucs - איטי)'
         type: boolean
-        default: true
+        default: false
       lyrics:
         description: 'תמלול מילים עם זמנים (Whisper)'
         type: boolean
         default: false
-      midi_engine:
-        description: 'מנוע חילוץ MIDI'
-        type: choice
-        options: [pyin, basic-pitch]
-        default: pyin
 
 permissions:
   contents: write
 
 jobs:
-  analyze:
+  extract:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     steps:
@@ -40,21 +35,24 @@ jobs:
 
       - name: Install Python packages (CPU only)
         env:
+          SEPARATE: ${{ inputs.separate }}
           LYRICS: ${{ inputs.lyrics }}
-          MIDI_ENGINE: ${{ inputs.midi_engine }}
         run: |
-          pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
+          if [ "$SEPARATE" = "true" ]; then
+            pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+            pip install demucs==4.0.1
+          fi
           if [ "$LYRICS" = "true" ]; then pip install faster-whisper; fi
-          if [ "$MIDI_ENGINE" = "basic-pitch" ]; then pip install basic-pitch; fi
 
       - name: Cache Demucs model
+        if: ${{ inputs.separate }}
         uses: actions/cache@v4
         with:
           path: ~/.cache/torch/hub/checkpoints
           key: demucs-htdemucs-v1
 
-      - name: Get the song
+      - name: Get the recording
         env:
           SONG_URL: ${{ inputs.song_url }}
         run: |
@@ -70,14 +68,13 @@ jobs:
           esac
           ls -lh input_song
 
-      - name: Analyze
+      - name: Extract melody
         env:
-          STEMS: ${{ inputs.stems }}
+          SEPARATE: ${{ inputs.separate }}
           LYRICS: ${{ inputs.lyrics }}
-          MIDI_ENGINE: ${{ inputs.midi_engine }}
         run: |
-          ARGS="--out out --midi-engine $MIDI_ENGINE"
-          [ "$STEMS" = "true" ] || ARGS="$ARGS --no-stems"
+          ARGS="--out out"
+          [ "$SEPARATE" = "true" ] && ARGS="$ARGS --separate"
           [ "$LYRICS" = "true" ] && ARGS="$ARGS --lyrics"
           python src/analyze.py input_song $ARGS
 
@@ -86,7 +83,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: analysis
+          name: melody
           path: out/
 
       - name: Publish release
@@ -94,13 +91,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SONG_URL: ${{ inputs.song_url }}
         run: |
-          TAG="analysis-${{ github.run_number }}"
+          TAG="melody-${{ github.run_number }}"
           NAME=$(basename "${SONG_URL%%\?*}")
           cd out
-          zip -qr analysis.zip analysis.json summary.md melody.mid stems 2>/dev/null || zip -qr analysis.zip analysis.json summary.md melody.mid
+          zip -qr melody.zip .
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "ניתוח: $NAME (#${{ github.run_number }})" \
+            --title "לחן: $NAME (#${{ github.run_number }})" \
             --notes-file summary.md \
-            analysis.zip analysis.json summary.md melody.mid $(ls stems/*.wav 2>/dev/null)
+            melody.zip melody.mid pitch_contour.csv analysis.json summary.md
           echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

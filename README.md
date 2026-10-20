@@ -1,42 +1,42 @@
 # song-edit
 
-עריכת שירים על CPU בלבד (GitHub Actions), עם שמירה על הלחן המקורי.
+מקליטים שיר בקול בלי ליווי -> המערכת מחלצת את הלחן ומבצעת אותו מחדש (כלים/סגנון), על CPU בלבד.
 
-## רעיון
-הלחן נחלץ כנתונים (MIDI) ונעול. רק מה שהתבקש משתנה.
+## ארכיטקטורה
+הלחן הוא המקור, והוא נשמר בשני פורמטים משלימים:
 
-| שלב | מצב | פלט |
-|-----|------|------|
-| 1. ניתוח | ✅ קיים | `analysis.json`, `melody.mid`, `stems/`, `summary.md` |
-| 2. תכנון (Gemini: הנחיה -> JSON פעולות) | ⏳ הבא | `plan.json` |
-| 3. יצירה / עיבוד מחדש | ⏳ הבא | `result.mp3` |
-| 4. בדיקת נאמנות ללחן | ⏳ הבא | דוח דמיון |
+| קובץ | תפקיד |
+|------|--------|
+| `melody.mid` | תווים + עוצמה + Pitch Bend (שומר גלישות וקישוטים) - נוח לעיבוד וליצירה |
+| `pitch_contour.csv` | עקום גובה הצליל המלא (Hz) - המקור המדויק, לבדיקת נאמנות |
+| `analysis.json` | טווח, שימוש בצלילים, רשימת תווים, תמלול (אופציונלי) |
+
+| שלב | מצב |
+|-----|------|
+| 1. חילוץ לחן מהקלטת סולו | ✅ קיים |
+| 2. תכנון (Gemini: הנחיה -> JSON) | ⏳ הבא |
+| 3. ביצוע: סינתזה מ-MIDI + Pitch Bend (fluidsynth / כלים) | ⏳ הבא |
+| 4. בדיקת נאמנות: השוואת עקום הגובה של התוצאה למקור | ⏳ הבא |
+
+אין זיהוי אקורדים. הלחן עצמו הוא הבסיס.
 
 ## שימוש
-1. העלה שיר לתיקיית `songs/` (או השתמש בכל קישור ישיר).
-2. Actions -> **analyze-song** -> Run workflow.
-3. הדבק את הקישור לקובץ. לדוגמה:
-   `https://github.com/USER/REPO/blob/main/songs/shir.mp3` (מומר אוטומטית ל-raw)
-   או נתיב בתוך הריפו: `songs/shir.mp3`
-4. בסיום: נוצר Release אוטומטי (`analysis-N`) עם `analysis.zip`, `analysis.json`, `melody.mid`, `summary.md` והערוצים. הקישור מופיע גם בסיכום הריצה. (הפלט נשמר גם ב-Artifacts.)
+1. העלה הקלטה ל-`songs/` (או כל קישור ישיר).
+2. Actions -> **extract-melody** -> Run workflow.
+3. הדבק קישור (`https://github.com/USER/REPO/blob/main/songs/shir.m4a` מומר אוטומטית ל-raw) או נתיב בתוך הריפו.
+4. בסיום נוצר Release (`melody-N`) עם כל הקבצים. הקישור מופיע בסיכום הריצה.
 
-> ריפו פרטי: קישור URL לא יעבוד בלי טוקן. השתמש בנתיב בתוך הריפו.
+ריפו פרטי: קישור URL לא יעבוד בלי טוקן, השתמש בנתיב בתוך הריפו.
 
 ## הרצה מקומית
 ```bash
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
-python src/analyze.py songs/shir.mp3 --out out            # מלא
-python src/analyze.py songs/shir.mp3 --out out --no-stems # מהיר
-python src/analyze.py songs/shir.mp3 --out out --lyrics   # + תמלול
+python src/analyze.py songs/shir.m4a --out out
+python src/analyze.py songs/shir.m4a --out out --lyrics          # + תמלול
+python src/analyze.py songs/shir.m4a --out out --separate        # יש ליווי בהקלטה
 ```
 
-## דגלים נוספים
-- `--tempo 92` לכפות BPM אם הזיהוי האוטומטי יצא כפול/חצי (ב-`analysis.json` יש `tempo_alternatives`)
-- `--lyrics-lang he` שפת התמלול (ברירת מחדל עברית; בלי זה Whisper עלול לזהות אנגלית ולתעתק)
-
 ## הערות
-- הניתוח אלגוריתמי (הערכה). מומלץ לבדוק את `melody.mid` לפני שלבי היצירה.
-- `pyin` מתאים למנגינה חד-קולית (שירה). `basic-pitch` לחומר פוליפוני.
-- ערוץ השירה נשאר ערוץ אודיו מקורי; MIDI מתאר תווים, לא מילים או גוון קול.
-- ריצה מלאה עם Demucs: כמה דקות עד כמה עשרות דקות לשיר, תלוי באורך.
+- הקלטה נקיה (מיקרופון קרוב, בלי רעש רקע, בלי הד) נותנת תוצאה טובה בהרבה.
+- חילוץ הגובה הוא אלגוריתמי (pyin). לעיתים יש טעויות אוקטבה; ה-`pitch_contour.csv` מאפשר לתקן.
+- דגלים: `--bend-range` (ברירת מחדל 2 חצאי טון), `--min-note` (ברירת מחדל 0.1 שניות).
