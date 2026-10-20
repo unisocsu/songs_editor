@@ -18,7 +18,7 @@
 3. הדבק את הקישור לקובץ. לדוגמה:
    `https://github.com/USER/REPO/blob/main/songs/shir.mp3` (מומר אוטומטית ל-raw)
    או נתיב בתוך הריפו: `songs/shir.mp3`
-4. בסיום: Artifacts -> `analysis` (zip עם כל הפלט).
+4. בסיום: נוצר Release אוטומטי (`analysis-N`) עם `analysis.zip`, `analysis.json`, `melody.mid`, `summary.md` והערוצים. הקישור מופיע גם בסיכום הריצה. (הפלט נשמר גם ב-Artifacts.)
 
 > ריפו פרטי: קישור URL לא יעבוד בלי טוקן. השתמש בנתיב בתוך הריפו.
 

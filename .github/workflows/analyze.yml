@@ -20,6 +20,9 @@ on:
         options: [pyin, basic-pitch]
         default: pyin
 
+permissions:
+  contents: write
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -85,3 +88,19 @@ jobs:
         with:
           name: analysis
           path: out/
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SONG_URL: ${{ inputs.song_url }}
+        run: |
+          TAG="analysis-${{ github.run_number }}"
+          NAME=$(basename "${SONG_URL%%\?*}")
+          cd out
+          zip -qr analysis.zip analysis.json summary.md melody.mid stems 2>/dev/null || zip -qr analysis.zip analysis.json summary.md melody.mid
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "ניתוח: $NAME (#${{ github.run_number }})" \
+            --notes-file summary.md \
+            analysis.zip analysis.json summary.md melody.mid $(ls stems/*.wav 2>/dev/null)
+          echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
