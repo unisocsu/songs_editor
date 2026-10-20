@@ -35,7 +35,11 @@ def rhythm_features(audio: Path):
     """האם יש פעימה יציבה בהקלטה? (0 = חופשי, קרוב ל-1 = פעימה ברורה)"""
     import librosa
 
-    y, sr = librosa.load(str(audio), sr=22050, mono=True)
+    with tempfile.TemporaryDirectory() as d:
+        wav = Path(d) / "a.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(audio), "-ac", "1",
+                        "-ar", "22050", str(wav)], check=True)
+        y, sr = librosa.load(str(wav), sr=22050, mono=True)
     hop = 512
     env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
     env = env - env.mean()
@@ -81,7 +85,12 @@ def call_gemini(model, api_key, prompt, audio_bytes=None, retries=3):
         try:
             with urllib.request.urlopen(req, timeout=300) as r:
                 data = json.load(r)
-            text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+            if not data.get("candidates"):
+                raise RuntimeError(f"no candidates (feedback: {data.get('promptFeedback')})")
+            cand = data["candidates"][0]
+            if "content" not in cand:
+                raise RuntimeError(f"empty response, finishReason={cand.get('finishReason')}")
+            text = "".join(p.get("text", "") for p in cand["content"]["parts"])
             return text
         except urllib.error.HTTPError as e:
             last = f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}"
@@ -90,7 +99,15 @@ def call_gemini(model, api_key, prompt, audio_bytes=None, retries=3):
             break
         except Exception as e:  # noqa: BLE001
             last = str(e)
+            log(f"ניסיון {attempt + 1} נכשל: {last[:300]}")
     raise RuntimeError(f"Gemini failed: {last}")
+
+
+def finish_reason(data):
+    try:
+        return data["candidates"][0].get("finishReason", "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def parse_json(text):
@@ -196,12 +213,16 @@ def main():
     log(f"שולח ל-{args.model} (סגנון: {style or 'זיהוי אוטומטי'})...")
     plan = None
     for attempt in range(2):
-        text = call_gemini(args.model, key, prompt, audio)
+        try:
+            text = call_gemini(args.model, key, prompt, audio)
+        except Exception as e:  # noqa: BLE001
+            print(f"::error::{e}", flush=True)
+            sys.exit(1)
         try:
             plan = validate(parse_json(text), analysis["duration_sec"])
             break
         except Exception as e:  # noqa: BLE001
-            log(f"תשובה לא תקינה ({e}), מנסה שוב...")
+            log(f"תשובה לא תקינה ({e}), מנסה שוב... תחילת התשובה: {text[:300]!r}")
     if plan is None:
         sys.exit("המודל לא החזיר תוכנית תקינה")
 

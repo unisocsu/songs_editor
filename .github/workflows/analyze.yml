@@ -87,6 +87,7 @@ jobs:
           python src/analyze.py input_song $ARGS
 
       - name: Plan arrangement (Gemini)
+        continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STYLE: ${{ inputs.style }}
