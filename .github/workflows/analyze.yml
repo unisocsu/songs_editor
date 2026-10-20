@@ -22,6 +22,10 @@ on:
         description: 'מודל Gemini לתכנון העיבוד'
         required: false
         default: 'gemini-2.5-flash'
+      accomp_gain:
+        description: 'עוצמת הליווי יחסית לקול (0.3 שקט, 0.6 רגיל, 1.0 חזק)'
+        required: false
+        default: '0.6'
 
 permissions:
   contents: write
@@ -39,7 +43,7 @@ jobs:
           cache: pip
 
       - name: Install system packages
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fluidsynth fluid-soundfont-gm
 
       - name: Install Python packages (CPU only)
         env:
@@ -110,6 +114,17 @@ jobs:
           PY
           fi
 
+      - name: Render arrangement
+        continue-on-error: true
+        env:
+          GAIN: ${{ inputs.accomp_gain }}
+        run: |
+          if [ -f out/plan.json ]; then
+            python src/render.py input_song --plan out/plan.json --melody out/melody.mid --out out --accomp-gain "$GAIN"
+          else
+            echo "::warning::אין plan.json - מדלג על הביצוע"
+          fi
+
       - name: Show summary
         run: cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -131,5 +146,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "לחן: $NAME (#${{ github.run_number }})" \
             --notes-file summary.md \
-            melody.zip melody.mid pitch_contour.csv analysis.json summary.md $(ls plan.json 2>/dev/null)
+            melody.zip melody.mid pitch_contour.csv analysis.json summary.md $(ls plan.json result.mp3 accompaniment.mp3 arrangement.mid 2>/dev/null)
           echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

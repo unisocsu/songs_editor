@@ -191,10 +191,11 @@ def main():
     ap.add_argument("--analysis", default="out/analysis.json")
     ap.add_argument("--out", default="out/plan.json")
     ap.add_argument("--style", default="", help="סגנון ידני; ריק = זיהוי אוטומטי מההקלטה")
-    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip())
     ap.add_argument("--dry-run", action="store_true", help="הדפס את הפרומפט בלי לקרוא ל-API")
     args = ap.parse_args()
 
+    args.model = args.model.strip()
     analysis = json.loads(Path(args.analysis).read_text(encoding="utf-8"))
     rhythm = rhythm_features(Path(args.audio))
     log(f"מאפייני קצב: {rhythm}")
@@ -205,7 +206,7 @@ def main():
         print(prompt[:3000])
         return
 
-    key = os.environ.get("GEMINI_API_KEY", "")
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         sys.exit("חסר GEMINI_API_KEY")
 
