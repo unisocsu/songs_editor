@@ -14,6 +14,14 @@ on:
         description: 'תמלול מילים עם זמנים (Whisper)'
         type: boolean
         default: false
+      style:
+        description: 'סגנון העיבוד (השאר ריק = המודל יזהה לבד מההקלטה)'
+        required: false
+        default: ''
+      gemini_model:
+        description: 'מודל Gemini לתכנון העיבוד'
+        required: false
+        default: 'gemini-2.5-flash'
 
 permissions:
   contents: write
@@ -78,6 +86,29 @@ jobs:
           [ "$LYRICS" = "true" ] && ARGS="$ARGS --lyrics"
           python src/analyze.py input_song $ARGS
 
+      - name: Plan arrangement (Gemini)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STYLE: ${{ inputs.style }}
+          GEMINI_MODEL: ${{ inputs.gemini_model }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "::warning::GEMINI_API_KEY לא מוגדר - מדלג על תכנון העיבוד"
+          else
+            python src/plan.py input_song --analysis out/analysis.json --out out/plan.json \
+              --style "$STYLE" --model "$GEMINI_MODEL"
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          p = json.load(open("out/plan.json", encoding="utf-8"))
+          print("\n## תוכנית עיבוד\n")
+          print(f"- סגנון: {p['style'].get('name')} ({'זוהה מההקלטה' if p['style'].get('detected_from_audio') else 'נקבע ידנית'})")
+          print(f"- קצב: {p['rhythm'].get('feel')} | BPM: {p['rhythm'].get('bpm')}")
+          print(f"- כלים: {', '.join(i['role'] for i in p['instruments'])}")
+          for w in p.get('warnings', []):
+              print(f"- אזהרה: {w}")
+          PY
+          fi
+
       - name: Show summary
         run: cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -99,5 +130,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "לחן: $NAME (#${{ github.run_number }})" \
             --notes-file summary.md \
-            melody.zip melody.mid pitch_contour.csv analysis.json summary.md
+            melody.zip melody.mid pitch_contour.csv analysis.json summary.md $(ls plan.json 2>/dev/null)
           echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
