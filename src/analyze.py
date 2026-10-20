@@ -89,6 +89,26 @@ def smooth_pitch(midi, k=5):
     return out
 
 
+def fix_octaves(midi, win=43, tol=8.0):
+    """תיקון קפיצות אוקטבה: צליל שרחוק מהחציון המקומי (~שנייה) מוזז באוקטבות לכיוונו."""
+    out = midi.copy()
+    n = len(out)
+    fixed = 0
+    for i in range(n):
+        if np.isnan(out[i]):
+            continue
+        seg = midi[max(0, i - win): i + win + 1]
+        med = np.nanmedian(seg)
+        d = out[i] - med
+        if abs(d) > tol:
+            shifted = out[i] - 12 * round(d / 12)
+            if abs(shifted - med) < abs(d) and abs(shifted - med) <= 5:
+                out[i] = shifted
+                fixed += 1
+    log(f"תוקנו {fixed} פריימים עם קפיצת אוקטבה")
+    return out
+
+
 def segment_notes(times, midi_s, rms, min_dur=0.1, merge_gap=0.15):
     """עקום גובה -> תווים (עיגול לחצי טון), עם עוצמה לכל תו."""
     frame = HOP / SR
@@ -164,12 +184,12 @@ def melody_summary(notes):
     for n in notes:
         name = NOTE_NAMES[n["pitch"] % 12]
         pc[name] = pc.get(name, 0.0) + (n["end"] - n["start"])
-    pc = {k: round(v, 2) for k, v in sorted(pc.items(), key=lambda kv: -kv[1])}
+    pc = {k: float(round(v, 2)) for k, v in sorted(pc.items(), key=lambda kv: -kv[1])}
     return {
         "note_count": len(notes),
         "lowest": pretty_midi.note_number_to_name(min(pitches)),
         "highest": pretty_midi.note_number_to_name(max(pitches)),
-        "voiced_seconds": round(sum(n["end"] - n["start"] for n in notes), 1),
+        "voiced_seconds": float(round(sum(n["end"] - n["start"] for n in notes), 1)),
         "pitch_class_seconds": pc,
     }
 
@@ -235,7 +255,7 @@ def main():
     duration = float(len(y) / sr)
 
     times, f0, midi, rms = extract_pitch(y, sr)
-    midi_s = smooth_pitch(midi)
+    midi_s = fix_octaves(smooth_pitch(midi))
     notes = segment_notes(times, midi_s, rms, min_dur=args.min_note)
 
     write_midi(notes, times, midi_s, out / "melody.mid", bend_range=args.bend_range)
